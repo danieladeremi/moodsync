@@ -297,73 +297,77 @@ def plot_feature_radar(
     save: bool = True,
 ) -> go.Figure:
     """
-    Radar chart showing each cluster's audio feature profile.
+    Radar chart showing each cluster's feature profile.
 
-    Great for visualising what makes each mood cluster distinct.
-
-    Parameters
-    ----------
-    cluster_to_mood : dict
-        Maps cluster_id â†’ mood label.
-    km : KMeans
-        Fitted K-Means model.
-    feature_cols : list[str]
-        Feature column names used in the model.
-    scaler : StandardScaler
-        Fitted scaler for inverse-transforming centroids.
-    save : bool
-
-    Returns
-    -------
-    go.Figure
+    Improvements over the original version:
+    - Uses unique legend labels (cluster id + mood).
+    - Selects features by between-cluster variance, so the chart highlights
+      dimensions that actually separate clusters.
+    - Min-max normalises each selected feature across clusters so all axes
+      are comparable on [0, 1].
     """
-    # Prefer intuitive features if present, then fall back to available non-scaled features.
+    del scaler  # kept in signature for compatibility with existing callers
+
+    # Prefer intuitive, human-readable dimensions when available.
     preferred_features = [
-        "energy", "valence", "danceability", "acousticness", "instrumentalness", "tempo",
         "mood_score", "energy_proxy", "release_recency",
-        "tag_energetic", "tag_happy", "tag_chill", "tag_sad", "tag_focus", "tag_party", "tag_dark",
+        "tag_energetic", "tag_happy", "tag_chill", "tag_sad",
+        "tag_focus", "tag_party", "tag_dark",
     ]
-    radar_features = [c for c in preferred_features if c in feature_cols]
-    if not radar_features:
-        radar_features = [
+
+    candidate_features = [
+        c for c in preferred_features
+        if c in feature_cols and not c.endswith("_scaled")
+    ]
+
+    if not candidate_features:
+        candidate_features = [
             c for c in feature_cols
             if not c.endswith("_scaled") and c not in {"listeners_log", "playcount_log"}
-        ][:8]
-    if not radar_features:
+        ]
+
+    if not candidate_features:
         raise ValueError("No compatible features available for radar plot.")
 
+    ordered_cluster_ids = sorted(cluster_to_mood.keys())
+    centroids = km.cluster_centers_
+
+    # Build [n_clusters, n_features] matrix from centroids in model feature space.
+    feature_idx = [feature_cols.index(f) for f in candidate_features]
+    raw_matrix = np.array([
+        [centroids[cid][idx] for idx in feature_idx]
+        for cid in ordered_cluster_ids
+    ], dtype=float)
+
+    # Pick the most discriminative axes (top variance across clusters).
+    variances = raw_matrix.var(axis=0)
+    top_n = min(8, len(candidate_features))
+    top_idx = np.argsort(variances)[::-1][:top_n]
+
+    radar_features = [candidate_features[i] for i in top_idx]
+    selected = raw_matrix[:, top_idx]
+
+    # Normalise each axis to [0, 1] across clusters for visual comparability.
+    mins = selected.min(axis=0)
+    maxs = selected.max(axis=0)
+    denom = np.where((maxs - mins) == 0, 1.0, (maxs - mins))
+    norm = (selected - mins) / denom
+
     fig = go.Figure()
-
-    for cluster_id, mood_label in cluster_to_mood.items():
-        centroid = km.cluster_centers_[cluster_id]
-
-        # Extract the 0â€“1 features directly from the centroid
-        values = []
-        for feat in radar_features:
-            if feat in feature_cols:
-                idx = feature_cols.index(feat)
-                values.append(centroid[idx])
-            else:
-                values.append(0.0)
-
+    for i, cluster_id in enumerate(ordered_cluster_ids):
+        mood_label = cluster_to_mood.get(cluster_id, "Unknown")
+        values = norm[i].tolist()
         fig.add_trace(go.Scatterpolar(
-            r=values + [values[0]],  # close the polygon
+            r=values + [values[0]],
             theta=radar_features + [radar_features[0]],
-            name=mood_label,
+            name=f"Cluster {cluster_id}: {mood_label}",
             fill="toself",
             opacity=0.6,
         ))
 
-    # Compute a sensible radial axis max based on plotted centroid values.
-    max_r = 1.0
-    for trace in fig.data:
-        vals = [v for v in trace.r if isinstance(v, (int, float))]
-        if vals:
-            max_r = max(max_r, max(vals))
-
     fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, max_r * 1.1])),
-        title="Cluster Audio Feature Profiles",
+        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+        title="Cluster Audio Feature Profiles (Normalised)",
         template="plotly_dark",
         font_family="monospace",
     )
@@ -374,7 +378,6 @@ def plot_feature_radar(
         logger.info("Radar plot saved.")
 
     return fig
-
 
 # â”€â”€ Entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if __name__ == "__main__":

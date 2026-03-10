@@ -184,7 +184,12 @@ if model_ready:
             <div class="stat-label">Mood Clusters</div>
         </div>""", unsafe_allow_html=True)
     with col3:
-        avg_energy = df_clustered["energy"].mean() if "energy" in df_clustered.columns else 0
+        if "energy_proxy" in df_clustered.columns:
+            avg_energy = df_clustered["energy_proxy"].mean()
+        elif "tag_energetic" in df_clustered.columns:
+            avg_energy = df_clustered["tag_energetic"].mean()
+        else:
+            avg_energy = 0
         st.markdown(f"""
         <div class="stat-box">
             <div class="stat-number">{avg_energy:.2f}</div>
@@ -192,10 +197,7 @@ if model_ready:
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     tab1, tab2, tab3 = st.tabs(["\U0001F3A7 Generate Playlist", "\U0001F4CA Cluster Visualisation", "\U0001F50D Explore Library"])
-
     # â”€â”€ Tab 1: Playlist generator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab1:
         st.markdown("### What's your mood?")
