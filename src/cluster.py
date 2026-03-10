@@ -248,53 +248,40 @@ def label_clusters(
     dict[int, str]
         Maps cluster_id → mood label string.
     """
-    from features import AUDIO_FEATURE_COLS, NEEDS_SCALING
-
     centroids_scaled = km.cluster_centers_
-
-    # Find the indices of the scaled columns in feature_cols
-    scaled_col_names = [f"{c}_scaled" for c in NEEDS_SCALING]
-    scaled_indices = [feature_cols.index(c) for c in scaled_col_names if c in feature_cols]
-    unscaled_indices = [i for i in range(len(feature_cols)) if i not in scaled_indices]
-
     cluster_to_mood = {}
 
     for cluster_id, centroid in enumerate(centroids_scaled):
-        # Inverse-transform the scaled dimensions
-        scaled_part = centroid[scaled_indices].reshape(1, -1)
-        original_values = scaler.inverse_transform(scaled_part)[0]
+        # Build a dict of feature_col -> centroid value
+        centroid_dict = {col: centroid[i] for i, col in enumerate(feature_cols)}
 
-        # Reconstruct the 9 core audio features from the centroid
-        centroid_audio = {}
-        for i, col in enumerate(feature_cols):
-            if col in AUDIO_FEATURE_COLS:
-                centroid_audio[col] = centroid[i]
-        for i, col in enumerate(NEEDS_SCALING):
-            centroid_audio[col] = original_values[i]
-
-        # Compare to each archetype using cosine similarity
+        # Compare centroid to each mood archetype using cosine similarity.
+        # Archetypes are defined in terms of tag_ feature names so we compare
+        # only the tag dimensions that exist in both the centroid and archetype.
         best_mood = None
         best_sim = -np.inf
 
         for mood_name, archetype in MOOD_ARCHETYPES.items():
-            # Build vectors from shared keys
-            keys = AUDIO_FEATURE_COLS
-            a = np.array([centroid_audio.get(k, 0) for k in keys])
-            b = np.array([archetype.get(k, 0) for k in keys])
+            # Archetypes already use exact tag_ column names
+            shared_keys = [k for k in archetype if k in centroid_dict]
+            if not shared_keys:
+                continue
 
-            # Normalise to avoid scale effects
+            a = np.array([centroid_dict[k] for k in shared_keys])
+            b = np.array([archetype[k] for k in shared_keys])
+
             a_norm = np.linalg.norm(a)
             b_norm = np.linalg.norm(b)
             if a_norm == 0 or b_norm == 0:
                 sim = 0.0
             else:
-                sim = np.dot(a, b) / (a_norm * b_norm)
+                sim = float(np.dot(a, b) / (a_norm * b_norm))
 
             if sim > best_sim:
                 best_sim = sim
                 best_mood = mood_name
 
-        cluster_to_mood[cluster_id] = best_mood
+        cluster_to_mood[cluster_id] = best_mood or "Unknown"
         logger.info(f"  Cluster {cluster_id} → {best_mood} (cosine sim: {best_sim:.3f})")
 
     return cluster_to_mood

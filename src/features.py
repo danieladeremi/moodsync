@@ -1,22 +1,46 @@
 """
 features.py
 -----------
-Merges track metadata with audio features into a clean, analysis-ready
-DataFrame.
+Builds the ML feature DataFrame from Spotify track metadata and Last.fm tags.
+
+Feature sources:
+
+  Spotify metadata (per track):
+    - popularity       : Spotify's 0–100 popularity score
+    - duration_ms      : track length in milliseconds
+    - explicit         : binary 0/1
+    - release_year     : extracted from album release date
+
+  Last.fm tag vectors (weighted 0–1):
+    - tag_energetic, tag_chill, tag_sad, tag_happy, etc.
+    - Crowd-sourced mood/activity tags normalised by tag count
+    - Primary mood/character signal for clustering
+
+  Last.fm popularity signals:
+    - listeners_log    : log10(listeners + 1)
+    - playcount_log    : log10(playcount + 1)
+
+  Engineered features:
+    - mood_score       : positive minus negative tag proxy (valence-like)
+    - energy_proxy     : energetic/workout/dance tag combination
+    - release_recency  : normalised release year within library
+
+Note on Spotify genres:
+  Spotify's artist genres are not available to new apps. The simplified
+  artist objects embedded in track responses do not include genre data,
+  and the artists batch endpoint (/v1/artists) is restricted for apps
+  created after November 27, 2024. Last.fm tags serve as a richer,
+  crowd-sourced replacement.
 
 Design decisions:
-- We keep both the audio features (ML inputs) and track metadata (name,
-  artist, album art) in one DataFrame so downstream steps never need to
-  re-join.
-- We engineer two composite features (energy_valence, danceability_tempo_norm)
-  that tend to produce better cluster separation than raw features alone.
-  These are kept alongside the originals so the model can decide.
-- We do NOT scale here. Scaling is the job of preprocess.py. This module
-  only extracts and engineers.
+- Log scaling on listener/playcount: raw values span several orders of
+  magnitude and would dominate distance calculations unscaled.
+- We do NOT scale here. Scaling is the job of preprocess.py.
 """
 
 import json
 import logging
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -28,97 +52,62 @@ logger = logging.getLogger(__name__)
 RAW_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 PROCESSED_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "processed"
 
-# ── The 9 core Spotify audio features used as ML inputs ───────────────────────
-AUDIO_FEATURE_COLS = [
-    "energy",           # Intensity and activity (0–1)
-    "valence",          # Musical positivity / happiness (0–1)
-    "danceability",     # Rhythm suitability for dancing (0–1)
-    "tempo",            # BPM — NOT on 0–1 scale, needs StandardScaler
-    "acousticness",     # Acoustic vs. electronic signal (0–1)
-    "instrumentalness", # Absence of vocals (0–1)
-    "liveness",         # Audience presence in recording (0–1)
-    "loudness",         # Average dB — negative values, needs StandardScaler
-    "speechiness",      # Proportion of spoken words (0–1)
-]
-
-# Features that are NOT on the 0–1 scale and will need StandardScaler
-NEEDS_SCALING = ["tempo", "loudness"]
-
-# Metadata columns we want to carry alongside features
+# ── Config ────────────────────────────────────────────────────────────────────
 METADATA_COLS = [
-    "id",
-    "name",
-    "artist",
-    "album",
-    "album_art_url",
-    "duration_ms",
-    "popularity",
-    "uri",
+    "id", "name", "artist", "album", "album_art_url",
+    "duration_ms", "popularity", "uri",
 ]
+
+# Columns that need StandardScaler (not on 0–1 scale)
+NEEDS_SCALING = ["popularity", "duration_ms", "listeners_log", "playcount_log"]
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
-def load_raw_data(
-    tracks_path: Path | None = None,
-    features_path: Path | None = None,
-) -> tuple[list[dict], list[dict]]:
+def load_raw_data() -> tuple[list[dict], dict[str, dict]]:
     """
-    Load raw JSON files saved by spotify_client.fetch_all_data().
-
-    Parameters
-    ----------
-    tracks_path : Path, optional
-        Override default path to tracks.json.
-    features_path : Path, optional
-        Override default path to audio_features.json.
+    Load raw JSON files produced by spotify_client and lastfm_client.
 
     Returns
     -------
-    tuple[list[dict], list[dict]]
-        (tracks, audio_features) as lists of dicts.
+    tuple: (tracks, lastfm_data)
     """
-    tracks_path = tracks_path or RAW_DATA_DIR / "tracks.json"
-    features_path = features_path or RAW_DATA_DIR / "audio_features.json"
-
-    with open(tracks_path) as f:
+    with open(RAW_DATA_DIR / "tracks.json") as f:
         tracks = json.load(f)
-    with open(features_path) as f:
-        audio_features = json.load(f)
 
-    logger.info(f"Loaded {len(tracks)} tracks and {len(audio_features)} feature records.")
-    return tracks, audio_features
+    lastfm_path = RAW_DATA_DIR / "lastfm_tags.json"
+    if lastfm_path.exists():
+        with open(lastfm_path) as f:
+            lastfm_data = json.load(f)
+    else:
+        logger.warning("lastfm_tags.json not found. Run lastfm_client.py first.")
+        lastfm_data = {}
+
+    logger.info(f"Loaded {len(tracks)} tracks, {len(lastfm_data)} Last.fm records.")
+    return tracks, lastfm_data
 
 
 # ── Parsers ───────────────────────────────────────────────────────────────────
 def parse_tracks(tracks: list[dict]) -> pd.DataFrame:
     """
-    Flatten raw track objects into a tidy metadata DataFrame.
-
-    Extracts the first artist name and the largest album image URL.
-
-    Parameters
-    ----------
-    tracks : list[dict]
-        Raw track objects from the Spotify API.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per track with columns matching METADATA_COLS.
+    Flatten raw Spotify track objects into a tidy metadata DataFrame.
     """
     rows = []
     for t in tracks:
-        # Some tracks may be malformed — skip rather than crash
         if not t or not t.get("id"):
             continue
 
         artists = t.get("artists", [])
-        artist_name = artists[0]["name"] if artists else "Unknown"
+        artist_name = artists[0].get("name", "Unknown") if artists else "Unknown"
 
         album = t.get("album", {})
         images = album.get("images", [])
-        # Images are sorted largest → smallest; take the first (largest)
         art_url = images[0]["url"] if images else None
+
+        release_date = album.get("release_date", "")
+        try:
+            release_year = int(release_date[:4]) if release_date else 2000
+        except ValueError:
+            release_year = 2000
 
         rows.append({
             "id": t["id"],
@@ -126,8 +115,10 @@ def parse_tracks(tracks: list[dict]) -> pd.DataFrame:
             "artist": artist_name,
             "album": album.get("name", ""),
             "album_art_url": art_url,
-            "duration_ms": t.get("duration_ms"),
-            "popularity": t.get("popularity"),
+            "duration_ms": t.get("duration_ms", 0),
+            "popularity": t.get("popularity", 0),
+            "explicit": int(t.get("explicit", False)),
+            "release_year": release_year,
             "uri": t.get("uri", ""),
         })
 
@@ -136,148 +127,145 @@ def parse_tracks(tracks: list[dict]) -> pd.DataFrame:
     return df
 
 
-def parse_audio_features(audio_features: list[dict]) -> pd.DataFrame:
+def build_lastfm_features(
+    df: pd.DataFrame,
+    lastfm_data: dict[str, dict],
+) -> pd.DataFrame:
     """
-    Flatten raw audio feature objects into a tidy DataFrame.
+    Add Last.fm tag vector and popularity features to the DataFrame.
 
-    Keeps only the 9 core ML feature columns plus track ID for joining.
-
-    Parameters
-    ----------
-    audio_features : list[dict]
-        Raw audio feature objects from the Spotify API.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per track with columns: ['id'] + AUDIO_FEATURE_COLS.
-    """
-    rows = []
-    for f in audio_features:
-        if not f or not f.get("id"):
-            continue
-        row = {"id": f["id"]}
-        for col in AUDIO_FEATURE_COLS:
-            row[col] = f.get(col)
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    logger.info(f"Parsed {len(df)} audio feature rows.")
-    return df
-
-
-# ── Feature engineering ───────────────────────────────────────────────────────
-def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add composite features that improve cluster separation.
-
-    New features:
-    - energy_valence : product of energy × valence. High = euphoric,
-      Low = dark/calm. Captures the mood quadrant more directly than
-      either feature alone.
-    - danceability_energy : product of danceability × energy. High = workout,
-      Low = ambient/sleep.
-    - tempo_norm : tempo normalised to [0, 1] using the observed range in
-      this dataset. Lets us combine tempo with 0–1 features without scaling
-      side effects in engineered products.
+    For tracks with no Last.fm data, tag features default to 0
+    and listener/playcount to log10(1) = 0.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Must contain all AUDIO_FEATURE_COLS.
+        Must contain 'id' column.
+    lastfm_data : dict
+        Maps track_id → {tag_vector, listeners, playcount}.
 
     Returns
     -------
     pd.DataFrame
-        Original DataFrame with 3 new columns appended.
+        With tag_* columns and listeners_log, playcount_log added.
     """
     df = df.copy()
 
-    df["energy_valence"] = df["energy"] * df["valence"]
-    df["danceability_energy"] = df["danceability"] * df["energy"]
+    # Get full set of tag column names from any record
+    tag_cols = []
+    for record in lastfm_data.values():
+        if record.get("tag_vector"):
+            tag_cols = list(record["tag_vector"].keys())
+            break
 
-    # Normalise tempo to [0, 1] using dataset min/max
-    t_min, t_max = df["tempo"].min(), df["tempo"].max()
-    if t_max > t_min:
-        df["tempo_norm"] = (df["tempo"] - t_min) / (t_max - t_min)
+    if not tag_cols:
+        logger.warning(
+            "No tag vectors found in Last.fm data. "
+            "Run python src/lastfm_client.py first."
+        )
+        return df
+
+    tag_rows = []
+    for _, row in df.iterrows():
+        record = lastfm_data.get(row["id"], {})
+        tag_vector = record.get("tag_vector", {})
+        listeners = record.get("listeners", 0)
+        playcount = record.get("playcount", 0)
+
+        feature_row = {col: tag_vector.get(col, 0.0) for col in tag_cols}
+        feature_row["listeners_log"] = math.log10(listeners + 1)
+        feature_row["playcount_log"] = math.log10(playcount + 1)
+        tag_rows.append(feature_row)
+
+    tag_df = pd.DataFrame(tag_rows, index=df.index)
+    df = pd.concat([df, tag_df], axis=1)
+
+    coverage = (df["listeners_log"] > 0).sum()
+    logger.info(
+        f"Added {len(tag_cols)} Last.fm tag features. "
+        f"Coverage: {coverage}/{len(df)} tracks ({coverage/len(df)*100:.0f}%)."
+    )
+    return df
+
+
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add engineered composite features.
+
+    - mood_score       : positive minus negative tag proxy (valence-like)
+    - energy_proxy     : energetic/workout/dance tag combination
+    - release_recency  : normalised release year within library
+    """
+    df = df.copy()
+
+    def get_col(name):
+        col = f"tag_{name}"
+        return df[col] if col in df.columns else pd.Series(0.0, index=df.index)
+
+    positive = (
+        get_col("happy") + get_col("feel_good") +
+        get_col("uplifting") + get_col("upbeat")
+    )
+    negative = (
+        get_col("sad") + get_col("melancholic") +
+        get_col("dark") + get_col("depressing")
+    )
+    df["mood_score"] = ((positive - negative) / 4.0).clip(-1, 1)
+
+    df["energy_proxy"] = (
+        get_col("energetic") + get_col("workout") +
+        get_col("dance") + get_col("party")
+    ).clip(0, 4) / 4.0
+
+    yr_min = df["release_year"].min()
+    yr_max = df["release_year"].max()
+    if yr_max > yr_min:
+        df["release_recency"] = (df["release_year"] - yr_min) / (yr_max - yr_min)
     else:
-        df["tempo_norm"] = 0.5
+        df["release_recency"] = 0.5
 
-    logger.info("Engineered 3 composite features: energy_valence, danceability_energy, tempo_norm.")
+    logger.info("Engineered 3 composite features: mood_score, energy_proxy, release_recency.")
     return df
 
 
 # ── Main builder ──────────────────────────────────────────────────────────────
 def build_feature_dataframe(
     tracks: list[dict] | None = None,
-    audio_features: list[dict] | None = None,
+    lastfm_data: dict | None = None,
     save: bool = True,
 ) -> pd.DataFrame:
     """
-    Full pipeline: load → parse → merge → engineer → return DataFrame.
-
-    If tracks/audio_features are not passed, loads from data/raw/.
-
-    Parameters
-    ----------
-    tracks : list[dict], optional
-        Raw track objects. If None, loads from disk.
-    audio_features : list[dict], optional
-        Raw audio feature objects. If None, loads from disk.
-    save : bool
-        If True, saves the merged DataFrame to data/processed/features.csv.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per track with metadata + audio features + engineered features.
+    Full pipeline: load → parse → Last.fm features → engineer → return.
     """
-    if tracks is None or audio_features is None:
-        tracks, audio_features = load_raw_data()
+    if tracks is None or lastfm_data is None:
+        tracks, lastfm_data = load_raw_data()
 
-    tracks_df = parse_tracks(tracks)
-    features_df = parse_audio_features(audio_features)
-
-    # Inner join: only keep tracks that have both metadata AND audio features
-    df = tracks_df.merge(features_df, on="id", how="inner")
-    logger.info(f"Merged DataFrame: {len(df)} rows (inner join on track ID).")
-
-    # Drop rows with any null in the audio feature columns
-    before = len(df)
-    df = df.dropna(subset=AUDIO_FEATURE_COLS)
-    dropped = before - len(df)
-    if dropped:
-        logger.warning(f"Dropped {dropped} rows with null audio features.")
-
-    # Engineer composite features
+    df = parse_tracks(tracks)
+    df = build_lastfm_features(df, lastfm_data)
     df = engineer_features(df)
 
-    # Reset index cleanly
+    df = df.dropna(subset=["id", "name"])
     df = df.reset_index(drop=True)
 
     if save:
         PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
         out_path = PROCESSED_DATA_DIR / "features.csv"
         df.to_csv(out_path, index=False)
-        logger.info(f"Feature DataFrame saved to {out_path}")
+        logger.info(f"Feature DataFrame saved to {out_path} — shape: {df.shape}")
 
     return df
 
 
-# ── Convenience getters ───────────────────────────────────────────────────────
-def get_ml_feature_cols() -> list[str]:
-    """
-    Return the full list of feature column names used as ML model inputs.
-    Includes original audio features + engineered features (excluding tempo
-    and loudness raw — those are scaled in preprocess.py).
-    """
-    engineered = ["energy_valence", "danceability_energy", "tempo_norm"]
-    return AUDIO_FEATURE_COLS + engineered
+def get_ml_feature_cols(df: pd.DataFrame) -> list[str]:
+    """Return ML feature columns, excluding metadata and intermediate columns."""
+    exclude = set(METADATA_COLS + ["explicit", "release_year"])
+    return [c for c in df.columns if c not in exclude]
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     df = build_feature_dataframe()
-    print(f"\nDataFrame shape: {df.shape}")
-    print(f"\nColumns: {list(df.columns)}")
-    print(f"\nSample row:\n{df.iloc[0]}")
+    ml_cols = get_ml_feature_cols(df)
+    print(f"\nDataFrame shape  : {df.shape}")
+    print(f"ML feature count : {len(ml_cols)}")
+    print(f"\nSample features  : {ml_cols[:10]}")

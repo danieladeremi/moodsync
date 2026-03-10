@@ -4,10 +4,21 @@ spotify_client.py
 Handles all Spotify API authentication and raw data fetching.
 
 Design decisions:
-- Uses Authorization Code Flow (not Client Credentials) so we can access
-  user-specific data: liked songs, top tracks, and create playlists.
-- Fetches in batches to respect Spotify's API limits (max 50 items/request
-  for tracks, max 100 audio features per request).
+- Uses Authorization Code Flow so we can access user-specific data:
+  liked songs, top tracks, and create playlists.
+- Spotify deprecated the following endpoints for new apps (Nov 27 2024):
+    audio-features, audio-analysis, artists (batch), recommendations,
+    related-artists, featured-playlists, category-playlists.
+  We use NONE of these.
+- Genre data: artist genres are NOT available via the artists batch endpoint
+  for new apps. However, genres ARE embedded inside the artist objects that
+  come back within track responses from saved_tracks and top_tracks — we
+  extract them directly from there.
+- Endpoints we DO use (all still available to new apps):
+    current_user_saved_tracks  → liked songs
+    current_user_top_tracks    → top tracks
+    user_playlist_create       → create playlist
+    playlist_add_items         → add tracks to playlist
 - Saves raw JSON to data/raw/ so we never need to re-fetch during development.
 """
 
@@ -20,7 +31,7 @@ from dotenv import load_dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-# ── Logging ──────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
@@ -30,11 +41,6 @@ logger = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 RAW_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 
-# Scopes we need:
-#   user-library-read     → access liked songs
-#   user-top-read         → access top tracks
-#   playlist-modify-public  → create/modify public playlists
-#   playlist-modify-private → create/modify private playlists
 SPOTIFY_SCOPES = " ".join([
     "user-library-read",
     "user-top-read",
@@ -42,9 +48,7 @@ SPOTIFY_SCOPES = " ".join([
     "playlist-modify-private",
 ])
 
-# Spotify API hard limits
-TRACKS_PER_REQUEST = 50       # max for saved tracks / top tracks endpoints
-AUDIO_FEATURES_PER_REQUEST = 100  # max for audio_features endpoint
+TRACKS_PER_REQUEST = 50
 
 
 # ── Client ────────────────────────────────────────────────────────────────────
@@ -94,14 +98,14 @@ def fetch_liked_songs(client: spotipy.Spotify, limit: int = 500) -> list[dict]:
     Parameters
     ----------
     client : spotipy.Spotify
-        Authenticated Spotify client.
     limit : int
-        Maximum number of tracks to fetch. Defaults to 500.
+        Maximum number of tracks to fetch.
 
     Returns
     -------
     list[dict]
-        List of raw track objects from the Spotify API.
+        List of saved track wrapper objects {"added_at", "track": {...}}.
+        The track object contains artists with genre data embedded.
     """
     tracks = []
     offset = 0
@@ -110,10 +114,7 @@ def fetch_liked_songs(client: spotipy.Spotify, limit: int = 500) -> list[dict]:
 
     while len(tracks) < limit:
         batch_size = min(TRACKS_PER_REQUEST, limit - len(tracks))
-        response = client.current_user_saved_tracks(
-            limit=batch_size,
-            offset=offset
-        )
+        response = client.current_user_saved_tracks(limit=batch_size, offset=offset)
 
         items = response.get("items", [])
         if not items:
@@ -123,7 +124,6 @@ def fetch_liked_songs(client: spotipy.Spotify, limit: int = 500) -> list[dict]:
         offset += len(items)
         logger.info(f"  Fetched {len(tracks)} liked songs so far...")
 
-        # Respect rate limits
         if response.get("next") is None:
             break
         time.sleep(0.1)
@@ -135,7 +135,7 @@ def fetch_liked_songs(client: spotipy.Spotify, limit: int = 500) -> list[dict]:
 def fetch_top_tracks(
     client: spotipy.Spotify,
     time_range: str = "medium_term",
-    limit: int = 100
+    limit: int = 100,
 ) -> list[dict]:
     """
     Fetch the current user's top tracks.
@@ -143,21 +143,20 @@ def fetch_top_tracks(
     Parameters
     ----------
     client : spotipy.Spotify
-        Authenticated Spotify client.
     time_range : str
         One of 'short_term' (4 weeks), 'medium_term' (6 months),
-        'long_term' (all time). Defaults to 'medium_term'.
+        'long_term' (all time).
     limit : int
-        Maximum number of tracks. Max 100. Defaults to 100.
+        Maximum number of tracks. Max 100.
 
     Returns
     -------
     list[dict]
-        List of raw track objects from the Spotify API.
+        List of track objects.
     """
     tracks = []
     offset = 0
-    limit = min(limit, 100)  # API hard cap for top tracks
+    limit = min(limit, 100)
 
     logger.info(f"Fetching top tracks (time_range={time_range})...")
 
@@ -166,7 +165,7 @@ def fetch_top_tracks(
         response = client.current_user_top_tracks(
             limit=batch_size,
             offset=offset,
-            time_range=time_range
+            time_range=time_range,
         )
 
         items = response.get("items", [])
@@ -184,89 +183,38 @@ def fetch_top_tracks(
     return tracks
 
 
-def fetch_audio_features(
-    client: spotipy.Spotify,
-    track_ids: list[str]
-) -> list[dict]:
-    """
-    Fetch audio features for a list of track IDs.
-
-    Batches requests to stay within Spotify's 100-track limit per call.
-    Filters out None responses (tracks Spotify has no features for).
-
-    Parameters
-    ----------
-    client : spotipy.Spotify
-        Authenticated Spotify client.
-    track_ids : list[str]
-        List of Spotify track IDs.
-
-    Returns
-    -------
-    list[dict]
-        List of audio feature objects. May be shorter than input if some
-        tracks have no features available.
-    """
-    features = []
-    total = len(track_ids)
-
-    logger.info(f"Fetching audio features for {total} tracks...")
-
-    for i in range(0, total, AUDIO_FEATURES_PER_REQUEST):
-        batch = track_ids[i:i + AUDIO_FEATURES_PER_REQUEST]
-        response = client.audio_features(batch)
-
-        if response:
-            valid = [f for f in response if f is not None]
-            features.extend(valid)
-            skipped = len(batch) - len(valid)
-            if skipped:
-                logger.warning(f"  {skipped} tracks had no audio features — skipped.")
-
-        logger.info(f"  Processed {min(i + AUDIO_FEATURES_PER_REQUEST, total)}/{total}")
-        time.sleep(0.1)
-
-    logger.info(f"Done. Audio features retrieved: {len(features)}")
-    return features
-
-
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 def fetch_all_data(
     liked_limit: int = 500,
     top_limit: int = 100,
-    save: bool = True
+    save: bool = True,
 ) -> dict:
     """
-    Full data pull: liked songs + top tracks + audio features.
+    Full data pull: liked songs + top tracks.
 
-    Deduplicates tracks across both sources before fetching audio features
-    to avoid redundant API calls.
+    Genre data is extracted directly from the artist objects embedded in
+    each track response — no separate artists endpoint call needed.
 
     Parameters
     ----------
     liked_limit : int
-        Max liked songs to fetch.
     top_limit : int
-        Max top tracks to fetch.
     save : bool
         If True, saves raw data to data/raw/ as JSON files.
 
     Returns
     -------
     dict with keys:
-        'tracks'        : deduplicated list of track metadata dicts
-        'audio_features': list of audio feature dicts
+        'tracks' : deduplicated list of track objects
     """
     client = get_spotify_client()
 
-    # Fetch raw track lists
     liked_raw = fetch_liked_songs(client, limit=liked_limit)
     top_raw = fetch_top_tracks(client, limit=top_limit)
 
-    # Normalise: liked songs are wrapped in {"added_at", "track": {...}}
-    # Top tracks are the track object directly
+    # Liked songs are wrapped: {"added_at": ..., "track": {...}}
     liked_tracks = [item["track"] for item in liked_raw if item.get("track")]
-    top_tracks = top_raw  # already track objects
+    top_tracks = top_raw
 
     # Deduplicate by track ID
     seen_ids = set()
@@ -279,26 +227,19 @@ def fetch_all_data(
 
     logger.info(f"Total unique tracks after deduplication: {len(all_tracks)}")
 
-    # Extract just the IDs for audio features call
-    track_ids = [t["id"] for t in all_tracks]
-    audio_features = fetch_audio_features(client, track_ids)
+    # Log how many tracks have genre data in their artist objects
+    with_genres = sum(
+        1 for t in all_tracks
+        if any(a.get("genres") for a in t.get("artists", []))
+    )
+    logger.info(f"Tracks with embedded genre data: {with_genres}/{len(all_tracks)}")
 
-    result = {
-        "tracks": all_tracks,
-        "audio_features": audio_features,
-    }
+    result = {"tracks": all_tracks}
 
     if save:
         RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-        tracks_path = RAW_DATA_DIR / "tracks.json"
-        features_path = RAW_DATA_DIR / "audio_features.json"
-
-        with open(tracks_path, "w") as f:
+        with open(RAW_DATA_DIR / "tracks.json", "w") as f:
             json.dump(all_tracks, f, indent=2)
-        with open(features_path, "w") as f:
-            json.dump(audio_features, f, indent=2)
-
         logger.info(f"Raw data saved to {RAW_DATA_DIR}")
 
     return result
@@ -309,7 +250,7 @@ def create_spotify_playlist(
     track_ids: list[str],
     name: str,
     description: str = "",
-    public: bool = False
+    public: bool = False,
 ) -> str:
     """
     Create a new Spotify playlist and add tracks to it.
@@ -317,15 +258,10 @@ def create_spotify_playlist(
     Parameters
     ----------
     client : spotipy.Spotify
-        Authenticated Spotify client.
     track_ids : list[str]
-        Spotify track IDs to add.
     name : str
-        Playlist name.
     description : str
-        Playlist description shown in Spotify.
     public : bool
-        Whether the playlist is public. Defaults to False.
 
     Returns
     -------
@@ -338,11 +274,10 @@ def create_spotify_playlist(
         user=user_id,
         name=name,
         public=public,
-        description=description
+        description=description,
     )
     playlist_id = playlist["id"]
 
-    # Add tracks in batches of 100 (Spotify limit)
     for i in range(0, len(track_ids), 100):
         batch = track_ids[i:i + 100]
         uris = [f"spotify:track:{tid}" for tid in batch]
@@ -354,9 +289,17 @@ def create_spotify_playlist(
     return playlist_url
 
 
-# ── Entry point (quick test) ───────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     data = fetch_all_data(liked_limit=200, top_limit=100)
     print(f"\nSummary:")
-    print(f"  Unique tracks : {len(data['tracks'])}")
-    print(f"  Audio features: {len(data['audio_features'])}")
+    print(f"  Unique tracks: {len(data['tracks'])}")
+
+    # Show a sample of genre data from the first few tracks
+    print(f"\nSample genre data:")
+    for track in data["tracks"][:5]:
+        name = track.get("name", "")
+        artists = track.get("artists", [])
+        artist_name = artists[0].get("name", "") if artists else ""
+        genres = artists[0].get("genres", []) if artists else []
+        print(f"  {name} — {artist_name}: {genres[:3]}")
