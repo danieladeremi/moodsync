@@ -1,0 +1,39 @@
+# Credentials — NEVER commit this
+.env
+
+# Data files (can be large)
+data/raw/
+data/processed/
+
+# Trained models
+models/*.pkl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Spotipy cache
+.cache
+.cache-*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# VS Code
+.vscode/
