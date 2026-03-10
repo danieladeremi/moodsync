@@ -1,4 +1,4 @@
-"""
+﻿"""
 cluster.py
 ----------
 Trains and evaluates K-Means clustering on the scaled audio feature matrix.
@@ -6,7 +6,7 @@ Trains and evaluates K-Means clustering on the scaled audio feature matrix.
 Design decisions:
 - K-Means is chosen over DBSCAN for this use case because:
     1. It produces exactly K interpretable clusters (one per mood).
-    2. Centroid distance is meaningful — used later by the recommender
+    2. Centroid distance is meaningful â€” used later by the recommender
        to map a mood input to the nearest cluster.
     3. Our data is continuous, approximately convex in feature space,
        and we expect a small number of mood archetypes (not arbitrary shapes).
@@ -38,89 +38,71 @@ K_MAX = 10
 
 # Mood archetype definitions.
 # Each archetype is defined by the direction of key features.
-# The recommender uses these to map user mood inputs → cluster IDs.
+# The recommender uses these to map user mood inputs â†’ cluster IDs.
 MOOD_ARCHETYPES = {
     "Energetic / Workout": {
-        "energy": 1.0,
-        "valence": 0.6,
-        "danceability": 0.8,
-        "tempo": 150,
-        "acousticness": 0.1,
-        "instrumentalness": 0.1,
-        "liveness": 0.3,
-        "loudness": -4,
-        "speechiness": 0.1,
+        "tag_energetic": 1.0,
+        "tag_high_energy": 0.9,
+        "tag_workout": 1.0,
+        "tag_running": 0.85,
+        "tag_gym": 0.85,
+        "tag_upbeat": 0.7,
+        "tag_uptempo": 0.7,
+        "tag_intense": 0.6,
     },
     "Happy / Feel-Good": {
-        "energy": 0.7,
-        "valence": 1.0,
-        "danceability": 0.75,
-        "tempo": 120,
-        "acousticness": 0.3,
-        "instrumentalness": 0.1,
-        "liveness": 0.15,
-        "loudness": -6,
-        "speechiness": 0.08,
+        "tag_happy": 1.0,
+        "tag_feel_good": 1.0,
+        "tag_uplifting": 0.9,
+        "tag_upbeat": 0.7,
+        "tag_pop": 0.6,
+        "tag_soul": 0.4,
     },
     "Chill / Relaxed": {
-        "energy": 0.35,
-        "valence": 0.55,
-        "danceability": 0.5,
-        "tempo": 90,
-        "acousticness": 0.6,
-        "instrumentalness": 0.3,
-        "liveness": 0.1,
-        "loudness": -10,
-        "speechiness": 0.04,
+        "tag_chill": 1.0,
+        "tag_chillout": 0.9,
+        "tag_calm": 0.9,
+        "tag_relaxing": 1.0,
+        "tag_mellow": 0.8,
+        "tag_ambient": 0.7,
+        "tag_lo_fi": 0.65,
     },
     "Focus / Deep Work": {
-        "energy": 0.45,
-        "valence": 0.3,
-        "danceability": 0.35,
-        "tempo": 100,
-        "acousticness": 0.4,
-        "instrumentalness": 0.8,
-        "liveness": 0.1,
-        "loudness": -12,
-        "speechiness": 0.03,
+        "tag_focus": 1.0,
+        "tag_study": 1.0,
+        "tag_concentration": 0.95,
+        "tag_background": 0.8,
+        "tag_instrumental": 0.8,
+        "tag_lo_fi": 0.5,
     },
     "Melancholic / Sad": {
-        "energy": 0.25,
-        "valence": 0.1,
-        "danceability": 0.3,
-        "tempo": 75,
-        "acousticness": 0.7,
-        "instrumentalness": 0.2,
-        "liveness": 0.08,
-        "loudness": -14,
-        "speechiness": 0.04,
+        "tag_sad": 1.0,
+        "tag_melancholic": 1.0,
+        "tag_melancholy": 0.9,
+        "tag_depressing": 0.85,
+        "tag_dark": 0.65,
+        "tag_acoustic": 0.45,
     },
     "Late Night / Dark": {
-        "energy": 0.55,
-        "valence": 0.2,
-        "danceability": 0.55,
-        "tempo": 110,
-        "acousticness": 0.15,
-        "instrumentalness": 0.4,
-        "liveness": 0.1,
-        "loudness": -7,
-        "speechiness": 0.06,
+        "tag_dark": 1.0,
+        "tag_ambient": 0.6,
+        "tag_electronic": 0.6,
+        "tag_hip_hop": 0.45,
+        "tag_rap": 0.45,
+        "tag_chill": 0.4,
     },
     "Party / Dance": {
-        "energy": 0.85,
-        "valence": 0.75,
-        "danceability": 0.9,
-        "tempo": 128,
-        "acousticness": 0.05,
-        "instrumentalness": 0.05,
-        "liveness": 0.2,
-        "loudness": -4,
-        "speechiness": 0.12,
+        "tag_party": 1.0,
+        "tag_dance": 1.0,
+        "tag_dancing": 0.9,
+        "tag_club": 0.85,
+        "tag_energetic": 0.8,
+        "tag_upbeat": 0.7,
     },
 }
 
 
-# ── Elbow method ──────────────────────────────────────────────────────────────
+# â”€â”€ Elbow method â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def compute_elbow_data(X: np.ndarray) -> pd.DataFrame:
     """
     Run K-Means for each K in [K_MIN, K_MAX] and record inertia and
@@ -176,7 +158,7 @@ def suggest_optimal_k(elbow_df: pd.DataFrame) -> int:
     return int(best_k)
 
 
-# ── Model training ────────────────────────────────────────────────────────────
+# â”€â”€ Model training â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def train_kmeans(
     X: np.ndarray,
     k: int,
@@ -202,7 +184,7 @@ def train_kmeans(
     logger.info(f"Training K-Means with K={k}...")
     km = KMeans(
         n_clusters=k,
-        init="k-means++",   # smarter initialisation → more stable clusters
+        init="k-means++",   # smarter initialisation â†’ more stable clusters
         n_init=20,           # run 20 times with different seeds, keep best
         max_iter=500,
         random_state=42,
@@ -220,7 +202,7 @@ def train_kmeans(
     return km
 
 
-# ── Cluster labelling ─────────────────────────────────────────────────────────
+# â”€â”€ Cluster labelling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def label_clusters(
     km: KMeans,
     feature_cols: list[str],
@@ -241,12 +223,12 @@ def label_clusters(
     feature_cols : list[str]
         Ordered feature column names (from preprocess.get_model_input_cols()).
     scaler : StandardScaler
-        Fitted scaler — used to inverse-transform centroids for comparison.
+        Fitted scaler â€” used to inverse-transform centroids for comparison.
 
     Returns
     -------
     dict[int, str]
-        Maps cluster_id → mood label string.
+        Maps cluster_id â†’ mood label string.
     """
     centroids_scaled = km.cluster_centers_
     cluster_to_mood = {}
@@ -282,12 +264,12 @@ def label_clusters(
                 best_mood = mood_name
 
         cluster_to_mood[cluster_id] = best_mood or "Unknown"
-        logger.info(f"  Cluster {cluster_id} → {best_mood} (cosine sim: {best_sim:.3f})")
+        logger.info(f"  Cluster {cluster_id} â†’ {best_mood} (cosine sim: {best_sim:.3f})")
 
     return cluster_to_mood
 
 
-# ── Full pipeline ─────────────────────────────────────────────────────────────
+# â”€â”€ Full pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def run_clustering_pipeline(
     X: np.ndarray,
     df: pd.DataFrame,
@@ -296,7 +278,7 @@ def run_clustering_pipeline(
     k: int | None = None,
 ) -> tuple[pd.DataFrame, KMeans, dict[int, str]]:
     """
-    End-to-end clustering: elbow → train → label → annotate DataFrame.
+    End-to-end clustering: elbow â†’ train â†’ label â†’ annotate DataFrame.
 
     Parameters
     ----------
@@ -319,7 +301,7 @@ def run_clustering_pipeline(
         km : KMeans
             Fitted K-Means model.
         cluster_to_mood : dict[int, str]
-            Cluster ID → mood label mapping.
+            Cluster ID â†’ mood label mapping.
     """
     if k is None:
         elbow_df = compute_elbow_data(X)
@@ -350,7 +332,7 @@ def run_clustering_pipeline(
     return df_clustered, km, cluster_to_mood
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# â”€â”€ Entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, str(Path(__file__).parent))
@@ -364,7 +346,7 @@ if __name__ == "__main__":
         X, df, feature_cols, scaler
     )
 
-    print("\nCluster → Mood mapping:")
+    print("\nCluster â†’ Mood mapping:")
     for cid, mood in cluster_to_mood.items():
         count = (df_clustered["cluster_id"] == cid).sum()
         print(f"  Cluster {cid}: {mood}  ({count} tracks)")

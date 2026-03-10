@@ -1,11 +1,11 @@
-"""
+﻿"""
 recommender.py
 --------------
 Maps a user's mood input to a cluster and returns a playlist of tracks.
 
 Design decisions:
 - We use centroid distance (cosine similarity) to match a mood string to
-  a cluster — not collaborative filtering. This means the system works with
+  a cluster â€” not collaborative filtering. This means the system works with
   only one user's data and requires no other users' history.
 - Mood input is matched to our MOOD_ARCHETYPES first, then the archetype
   is compared against cluster centroids. This gives us a natural language
@@ -25,8 +25,8 @@ import pandas as pd
 import joblib
 
 from cluster import MOOD_ARCHETYPES
-from features import AUDIO_FEATURE_COLS
-from preprocess import transform_single_track, get_model_input_cols
+from features import METADATA_COLS, NEEDS_SCALING
+from preprocess import transform_single_track
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 PROCESSED_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "processed"
 
 
-# ── Loaders ───────────────────────────────────────────────────────────────────
+# â”€â”€ Loaders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def load_model_artifacts() -> tuple:
     """
     Load the trained K-Means model and fitted scaler from disk.
@@ -56,8 +56,8 @@ def load_model_artifacts() -> tuple:
         )
 
     km = joblib.load(model_path)
-    scaler = joblib.load(scaler_path)
-    return km, scaler
+    scaler_obj, cols_to_scale = joblib.load(scaler_path)
+    return km, scaler_obj, cols_to_scale
 
 
 def load_clustered_tracks() -> pd.DataFrame:
@@ -76,7 +76,7 @@ def load_clustered_tracks() -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-# ── Mood matching ─────────────────────────────────────────────────────────────
+# â”€â”€ Mood matching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def match_mood_to_archetype(mood_query: str) -> tuple[str, dict]:
     """
     Match a free-text mood query to the closest named mood archetype.
@@ -96,7 +96,7 @@ def match_mood_to_archetype(mood_query: str) -> tuple[str, dict]:
     """
     query_lower = mood_query.lower()
 
-    # Keyword → archetype name mapping for common inputs
+    # Keyword â†’ archetype name mapping for common inputs
     keyword_map = {
         "workout": "Energetic / Workout",
         "exercise": "Energetic / Workout",
@@ -167,6 +167,7 @@ def find_best_cluster_for_archetype(
     archetype_features: dict,
     km,
     scaler,
+    cols_to_scale: list[str],
     feature_cols: list[str],
 ) -> int:
     """
@@ -190,7 +191,12 @@ def find_best_cluster_for_archetype(
         Cluster ID of the best matching cluster.
     """
     # Transform archetype into the same scaled feature space as the model
-    archetype_scaled = transform_single_track(archetype_features, scaler)
+    archetype_scaled = transform_single_track(
+        archetype_features,
+        feature_cols,
+        scaler=scaler,
+        cols_to_scale=cols_to_scale,
+    )
 
     centroids = km.cluster_centers_
     best_cluster = None
@@ -199,6 +205,14 @@ def find_best_cluster_for_archetype(
     for cluster_id, centroid in enumerate(centroids):
         a = archetype_scaled[0]
         b = centroid
+
+        # Guard against feature schema drift between saved model and runtime columns.
+        if a.shape[0] != b.shape[0]:
+            if a.shape[0] < b.shape[0]:
+                a = np.pad(a, (0, b.shape[0] - a.shape[0]), mode="constant")
+            else:
+                a = a[: b.shape[0]]
+
         a_norm = np.linalg.norm(a)
         b_norm = np.linalg.norm(b)
         if a_norm == 0 or b_norm == 0:
@@ -214,7 +228,7 @@ def find_best_cluster_for_archetype(
     return best_cluster
 
 
-# ── Playlist builder ──────────────────────────────────────────────────────────
+# â”€â”€ Playlist builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def get_playlist(
     mood_query: str,
     n_tracks: int = 20,
@@ -252,16 +266,23 @@ def get_playlist(
     """
     # Load artifacts if not provided
     if km is None or scaler is None:
-        km, scaler = load_model_artifacts()
+        km, scaler, cols_to_scale = load_model_artifacts()
     if df_clustered is None:
         df_clustered = load_clustered_tracks()
+    if km is not None and scaler is not None and 'cols_to_scale' not in locals():
+        cols_to_scale = [c for c in NEEDS_SCALING if c in df_clustered.columns]
 
-    feature_cols = get_model_input_cols()
+    excluded = set(METADATA_COLS + ["explicit", "release_year", "cluster_id", "mood_label"])
+    raw_feature_cols = [c for c in df_clustered.columns if c not in excluded]
+    base_cols = [c for c in raw_feature_cols if c not in cols_to_scale]
+    # Keep all expected scaled model dimensions, even if only raw columns exist in df_clustered.
+    scaled_cols = [f"{c}_scaled" for c in cols_to_scale]
+    feature_cols = base_cols + scaled_cols
 
-    # Match mood to archetype → cluster
+    # Match mood to archetype â†’ cluster
     archetype_name, archetype_features = match_mood_to_archetype(mood_query)
     target_cluster = find_best_cluster_for_archetype(
-        archetype_features, km, scaler, feature_cols
+        archetype_features, km, scaler, cols_to_scale, feature_cols
     )
 
     # Filter to tracks in the target cluster
@@ -306,7 +327,7 @@ def get_playlist(
 
     logger.info(
         f"Playlist generated: {len(playlist)} tracks for mood '{mood_query}' "
-        f"→ archetype '{archetype_name}' → cluster {target_cluster}"
+        f"â†’ archetype '{archetype_name}' â†’ cluster {target_cluster}"
     )
     return playlist
 
@@ -316,12 +337,15 @@ def get_available_moods() -> list[str]:
     return list(MOOD_ARCHETYPES.keys())
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# â”€â”€ Entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if __name__ == "__main__":
     playlist = get_playlist("workout", n_tracks=10)
     if not playlist.empty:
         print(f"\nPlaylist ({len(playlist)} tracks):\n")
         for _, row in playlist.iterrows():
-            print(f"  {row['name']} — {row['artist']}  [{row.get('mood_label', '')}]")
+            print(f"  {row['name']} â€” {row['artist']}  [{row.get('mood_label', '')}]")
     else:
         print("No tracks found. Have you run the clustering pipeline yet?")
+
+
+

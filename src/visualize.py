@@ -1,4 +1,4 @@
-"""
+﻿"""
 visualize.py
 ------------
 Generates interactive visualisations of the cluster structure using
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 OUTPUTS_DIR = Path(__file__).resolve().parent.parent / "data" / "processed"
 
 
-# ── PCA ───────────────────────────────────────────────────────────────────────
+# â”€â”€ PCA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def run_pca(X: np.ndarray, n_components: int = 2) -> tuple[np.ndarray, PCA]:
     """
     Fit PCA on the scaled feature matrix and return 2D projections.
@@ -55,6 +55,15 @@ def run_pca(X: np.ndarray, n_components: int = 2) -> tuple[np.ndarray, PCA]:
         f"{variance_explained:.1f}% of variance."
     )
     return X_pca, pca
+
+
+def _build_hover_data(plot_df: pd.DataFrame, preferred: list[str], hidden_axes: list[str]) -> dict:
+    """Build Plotly hover_data dict using only columns that exist."""
+    hover_data = {col: ":.2f" for col in preferred if col in plot_df.columns}
+    for axis in hidden_axes:
+        if axis in plot_df.columns:
+            hover_data[axis] = False
+    return hover_data
 
 
 def run_umap(X: np.ndarray, n_neighbors: int = 15, min_dist: float = 0.1) -> np.ndarray:
@@ -82,7 +91,7 @@ def run_umap(X: np.ndarray, n_neighbors: int = 15, min_dist: float = 0.1) -> np.
     except ImportError:
         raise ImportError("umap-learn is required. Run: pip install umap-learn")
 
-    logger.info("Running UMAP (this may take 30–60 seconds for large datasets)...")
+    logger.info("Running UMAP (this may take 30â€“60 seconds for large datasets)...")
     reducer = umap.UMAP(
         n_components=2,
         n_neighbors=n_neighbors,
@@ -95,7 +104,7 @@ def run_umap(X: np.ndarray, n_neighbors: int = 15, min_dist: float = 0.1) -> np.
     return X_umap
 
 
-# ── Plot builders ─────────────────────────────────────────────────────────────
+# â”€â”€ Plot builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def plot_pca_clusters(
     df: pd.DataFrame,
     X_pca: np.ndarray,
@@ -124,7 +133,7 @@ def plot_pca_clusters(
     plot_df = df.copy()
     plot_df["PC1"] = X_pca[:, 0]
     plot_df["PC2"] = X_pca[:, 1]
-    plot_df["hover"] = plot_df["name"] + " — " + plot_df["artist"]
+    plot_df["hover"] = plot_df["name"] + " â€” " + plot_df["artist"]
 
     var1 = pca.explained_variance_ratio_[0] * 100
     var2 = pca.explained_variance_ratio_[1] * 100
@@ -135,8 +144,8 @@ def plot_pca_clusters(
         y="PC2",
         color="mood_label",
         hover_name="hover",
-        hover_data={"energy": ":.2f", "valence": ":.2f", "PC1": False, "PC2": False},
-        title="PCA — Music Mood Clusters",
+        hover_data=_build_hover_data(plot_df, ["energy", "valence", "mood_score", "energy_proxy"], ["PC1", "PC2"]),
+        title="PCA â€” Music Mood Clusters",
         labels={
             "PC1": f"PC1 ({var1:.1f}% variance)",
             "PC2": f"PC2 ({var2:.1f}% variance)",
@@ -185,7 +194,7 @@ def plot_umap_clusters(
     plot_df = df.copy()
     plot_df["UMAP1"] = X_umap[:, 0]
     plot_df["UMAP2"] = X_umap[:, 1]
-    plot_df["hover"] = plot_df["name"] + " — " + plot_df["artist"]
+    plot_df["hover"] = plot_df["name"] + " â€” " + plot_df["artist"]
 
     fig = px.scatter(
         plot_df,
@@ -193,14 +202,12 @@ def plot_umap_clusters(
         y="UMAP2",
         color="mood_label",
         hover_name="hover",
-        hover_data={
-            "energy": ":.2f",
-            "valence": ":.2f",
-            "danceability": ":.2f",
-            "UMAP1": False,
-            "UMAP2": False,
-        },
-        title="UMAP — Music Mood Clusters",
+        hover_data=_build_hover_data(
+            plot_df,
+            ["energy", "valence", "danceability", "mood_score", "energy_proxy", "release_recency"],
+            ["UMAP1", "UMAP2"],
+        ),
+        title="UMAP â€” Music Mood Clusters",
         labels={"mood_label": "Mood"},
         template="plotly_dark",
         color_discrete_sequence=px.colors.qualitative.Bold,
@@ -297,7 +304,7 @@ def plot_feature_radar(
     Parameters
     ----------
     cluster_to_mood : dict
-        Maps cluster_id → mood label.
+        Maps cluster_id â†’ mood label.
     km : KMeans
         Fitted K-Means model.
     feature_cols : list[str]
@@ -310,17 +317,27 @@ def plot_feature_radar(
     -------
     go.Figure
     """
-    from features import AUDIO_FEATURE_COLS, NEEDS_SCALING
-
-    # We'll only show the clean 0–1 features in the radar for readability
-    radar_features = [c for c in AUDIO_FEATURE_COLS if c not in NEEDS_SCALING]
+    # Prefer intuitive features if present, then fall back to available non-scaled features.
+    preferred_features = [
+        "energy", "valence", "danceability", "acousticness", "instrumentalness", "tempo",
+        "mood_score", "energy_proxy", "release_recency",
+        "tag_energetic", "tag_happy", "tag_chill", "tag_sad", "tag_focus", "tag_party", "tag_dark",
+    ]
+    radar_features = [c for c in preferred_features if c in feature_cols]
+    if not radar_features:
+        radar_features = [
+            c for c in feature_cols
+            if not c.endswith("_scaled") and c not in {"listeners_log", "playcount_log"}
+        ][:8]
+    if not radar_features:
+        raise ValueError("No compatible features available for radar plot.")
 
     fig = go.Figure()
 
     for cluster_id, mood_label in cluster_to_mood.items():
         centroid = km.cluster_centers_[cluster_id]
 
-        # Extract the 0–1 features directly from the centroid
+        # Extract the 0â€“1 features directly from the centroid
         values = []
         for feat in radar_features:
             if feat in feature_cols:
@@ -337,8 +354,15 @@ def plot_feature_radar(
             opacity=0.6,
         ))
 
+    # Compute a sensible radial axis max based on plotted centroid values.
+    max_r = 1.0
+    for trace in fig.data:
+        vals = [v for v in trace.r if isinstance(v, (int, float))]
+        if vals:
+            max_r = max(max_r, max(vals))
+
     fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+        polar=dict(radialaxis=dict(visible=True, range=[0, max_r * 1.1])),
         title="Cluster Audio Feature Profiles",
         template="plotly_dark",
         font_family="monospace",
@@ -352,7 +376,7 @@ def plot_feature_radar(
     return fig
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# â”€â”€ Entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, str(Path(__file__).parent))
@@ -373,3 +397,4 @@ if __name__ == "__main__":
     plot_feature_radar(cluster_to_mood, km, feature_cols, scaler)
 
     print("All visualisations saved to data/processed/")
+

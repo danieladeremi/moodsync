@@ -1,7 +1,7 @@
-"""
+﻿"""
 streamlit_app.py
 ----------------
-MoodSync — Interactive Spotify Playlist Generator
+MoodSync â€” Interactive Spotify Playlist Generator
 
 Run with:
     streamlit run app/streamlit_app.py
@@ -25,15 +25,15 @@ from features import build_feature_dataframe
 from preprocess import fit_and_scale
 from cluster import run_clustering_pipeline
 
-# ── Page config ───────────────────────────────────────────────────────────────
+# â”€â”€ Page config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 st.set_page_config(
     page_title="MoodSync",
-    page_icon="🎵",
+    page_icon="\U0001F3B5",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── Styling ───────────────────────────────────────────────────────────────────
+# â”€â”€ Styling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap');
@@ -104,10 +104,10 @@ h1, h2, h3 {
 """, unsafe_allow_html=True)
 
 
-# ── Session state ─────────────────────────────────────────────────────────────
+# â”€â”€ Session state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @st.cache_resource(show_spinner="Loading model artifacts...")
 def load_artifacts():
-    km, scaler = load_model_artifacts()
+    km, scaler, _ = load_model_artifacts()
     df_clustered = load_clustered_tracks()
     return km, scaler, df_clustered
 
@@ -117,9 +117,9 @@ def get_umap_data(X):
     return run_umap(X)
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+# â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 with st.sidebar:
-    st.markdown("# 🎵 MoodSync")
+    st.markdown("# \U0001F3B5 MoodSync")
     st.markdown("*Spotify ML Playlist Generator*")
     st.divider()
 
@@ -128,21 +128,21 @@ with st.sidebar:
 1. Your liked songs are pulled from Spotify
 2. Audio features are extracted (energy, valence, tempo...)
 3. K-Means clusters them into mood groups
-4. You pick a mood → get your playlist
+4. You pick a mood -> get your playlist
     """)
 
     st.divider()
 
     st.markdown("### Re-run pipeline")
-    if st.button("🔄 Refresh data from Spotify", use_container_width=True):
+    if st.button("\U0001F504 Refresh data from Spotify", use_container_width=True):
         st.info("Run `python src/spotify_client.py` then restart the app.")
 
     st.divider()
-    st.caption("Built with Spotipy · scikit-learn · UMAP · Streamlit")
+    st.caption("Built with Spotipy | scikit-learn | UMAP | Streamlit")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-st.title("🎵 MoodSync")
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+st.title("\U0001F3B5 MoodSync")
 st.markdown("##### ML-powered playlists from your Spotify library")
 st.divider()
 
@@ -165,7 +165,7 @@ except FileNotFoundError as e:
 
 if model_ready:
 
-    # ── Stats row ──────────────────────────────────────────────────────────────
+    # â”€â”€ Stats row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     n_tracks = len(df_clustered)
     n_clusters = df_clustered["cluster_id"].nunique()
     mood_labels = df_clustered["mood_label"].unique().tolist()
@@ -193,10 +193,10 @@ if model_ready:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Tabs ───────────────────────────────────────────────────────────────────
-    tab1, tab2, tab3 = st.tabs(["🎧 Generate Playlist", "📊 Cluster Visualisation", "🔍 Explore Library"])
+    # â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    tab1, tab2, tab3 = st.tabs(["\U0001F3A7 Generate Playlist", "\U0001F4CA Cluster Visualisation", "\U0001F50D Explore Library"])
 
-    # ── Tab 1: Playlist generator ──────────────────────────────────────────────
+    # â”€â”€ Tab 1: Playlist generator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab1:
         st.markdown("### What's your mood?")
 
@@ -229,7 +229,7 @@ if model_ready:
                 help="Higher = more varied picks from the cluster"
             )
 
-        generate_btn = st.button("✨ Generate Playlist", type="primary", use_container_width=True)
+        generate_btn = st.button("\u2728 Generate Playlist", type="primary", use_container_width=True)
 
         if generate_btn or "last_playlist" in st.session_state:
 
@@ -260,14 +260,14 @@ if model_ready:
                     if track_ids:
                         col_export, col_dl = st.columns([1, 1])
                         with col_export:
-                            if st.button("➕ Export to Spotify", use_container_width=True):
+                            if st.button("\u2795 Export to Spotify", use_container_width=True):
                                 try:
                                     from spotify_client import get_spotify_client, create_spotify_playlist
                                     client = get_spotify_client()
                                     url = create_spotify_playlist(
                                         client,
                                         track_ids,
-                                        name=f"MoodSync — {detected_mood}",
+                                        name=f"MoodSync â€” {detected_mood}",
                                         description=f"Generated by MoodSync ML for mood: {mood_query}",
                                     )
                                     st.success(f"Playlist created! [Open in Spotify]({url})")
@@ -276,7 +276,7 @@ if model_ready:
                         with col_dl:
                             csv = playlist[["name", "artist", "album"]].to_csv(index=False)
                             st.download_button(
-                                "⬇️ Download CSV",
+                                "Download CSV",
                                 data=csv,
                                 file_name=f"moodsync_{mood_query.replace(' ','_')}.csv",
                                 mime="text/csv",
@@ -295,7 +295,7 @@ if model_ready:
                         {img_tag}
                         <div>
                             <p class="track-name">{row.get("name", "")}</p>
-                            <p class="track-artist">{row.get("artist", "")} · {row.get("album", "")}</p>
+                            <p class="track-artist">{row.get("artist", "")} \u00b7 {row.get("album", "")}</p>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
@@ -327,7 +327,7 @@ if model_ready:
             else:
                 st.warning("No tracks found for this mood. Try a different one.")
 
-    # ── Tab 2: Cluster visualisation ───────────────────────────────────────────
+    # â”€â”€ Tab 2: Cluster visualisation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab2:
         st.markdown("### Cluster Visualisation")
         st.markdown(
@@ -341,7 +341,7 @@ if model_ready:
             horizontal=True,
         )
 
-        feature_cols = get_model_input_cols()
+        feature_cols = get_model_input_cols(df_clustered.drop(columns=["cluster_id", "mood_label"], errors="ignore"))
         available_cols = [c for c in feature_cols if c in df_clustered.columns]
 
         if available_cols:
@@ -371,7 +371,7 @@ if model_ready:
         else:
             st.warning("Feature columns not found in clustered data.")
 
-    # ── Tab 3: Explore library ─────────────────────────────────────────────────
+    # â”€â”€ Tab 3: Explore library â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab3:
         st.markdown("### Your Library")
 
@@ -392,3 +392,4 @@ if model_ready:
             use_container_width=True,
             height=500,
         )
+
